@@ -1,0 +1,46 @@
+# Secrets & credentials
+.env
+*.env.*
+
+# Personal config (not for public repos)
+config/shay_context.yaml
+
+# Claude Code internal files
+.claude/
+context.md
+CLAUDE.md
+
+# Graphify tool output (internal)
+graphify-out/
+.graphify_*
+
+# Database & vector store
+*.db
+*.sqlite
+chroma/
+chroma_db/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+
+# Virtual environments
+.venv/
+venv/
+
+# IDE
+.idea/
+.vscode/
+
+# Logs
+*.log
+bash-log.txt
+
+# Private docs (contain personal paths/info)
+docs/lessons/
+docs/archive/
+docs/superpowers/
