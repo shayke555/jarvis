@@ -43,7 +43,7 @@ def _get_context_manager() -> ContextManager:
 
 
 def _is_authorized(update: Update) -> bool:
-    return str(update.effective_user.id) == settings.telegram_shay_chat_id
+    return str(update.effective_user.id) == settings.telegram_owner_chat_id
 
 
 async def _reject_unauthorized(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -52,7 +52,7 @@ async def _reject_unauthorized(update: Update, context: ContextTypes.DEFAULT_TYP
 
 async def handle_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     uid = update.effective_user.id if update.effective_user else "unknown"
-    logger.info("DEBUG /start from user_id=%s (expected=%s)", uid, _context_manager and "set" or "not set")
+    logger.info("Received /start — user_id=%s", uid)
     if not _is_authorized(update):
         logger.warning("Unauthorized user: %s", uid)
         await _reject_unauthorized(update, context)
@@ -201,8 +201,8 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         await update.message.reply_text(f"🎙 {text}\n\n{response}")
 
     except Exception as e:
-        logger.error("Voice handler error: %s", e)
-        await update.message.reply_text(f"שגיאה בעיבוד הודעת הקול: {e}")
+        logger.error("Voice handler error: %s", e, exc_info=True)
+        await update.message.reply_text("שגיאה בעיבוד הודעת הקול. נסה שוב.")
 
 
 def setup_telegram(app: FastAPI, cm: ContextManager) -> None:

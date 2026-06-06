@@ -12,7 +12,7 @@ READ_FILE_SCHEMA = {
     "function": {
         "name": "read_file",
         "description": (
-            "Read the contents of a file on Shay's computer. "
+            "Read the contents of a local file. "
             "Use when asked to read, analyze, or summarize a document or code file."
         ),
         "parameters": {
@@ -34,7 +34,7 @@ WRITE_FILE_SCHEMA = {
     "type": "function",
     "function": {
         "name": "write_file",
-        "description": "Write content to a file on Shay's computer.",
+        "description": "Write content to a local file.",
         "parameters": {
             "type": "object",
             "properties": {
@@ -62,14 +62,27 @@ LIST_DIR_SCHEMA = {
 }
 
 
+def _safe_path(path: str) -> Path | None:
+    """Resolve path and reject traversal attacks (e.g. ../../etc/passwd)."""
+    from config.settings import settings
+    resolved = Path(path).resolve()
+    base = Path(settings.projects_base_path).resolve() if settings.projects_base_path else None
+    if base and not str(resolved).startswith(str(base)):
+        return None
+    if ".." in Path(path).parts:
+        return None
+    return resolved
+
+
 async def read_file_tool(path: str, max_chars: int = 4000) -> ToolResult:
     try:
-        p = Path(path)
+        p = _safe_path(path)
+        if p is None:
+            return ToolResult(tool_name="read_file", output="", success=False,
+                              error="Path rejected: outside allowed directory or contains traversal.")
         if not p.exists():
-            return ToolResult(
-                tool_name="read_file", output="", success=False,
-                error=f"File not found: {path}",
-            )
+            return ToolResult(tool_name="read_file", output="", success=False,
+                              error=f"File not found: {path}")
         content = p.read_text(encoding="utf-8", errors="replace")[:max_chars]
         return ToolResult(tool_name="read_file", output=f"[{path}]\n{content}", success=True)
     except Exception as e:
@@ -78,14 +91,14 @@ async def read_file_tool(path: str, max_chars: int = 4000) -> ToolResult:
 
 async def write_file_tool(path: str, content: str) -> ToolResult:
     try:
-        p = Path(path)
+        p = _safe_path(path)
+        if p is None:
+            return ToolResult(tool_name="write_file", output="", success=False,
+                              error="Path rejected: outside allowed directory or contains traversal.")
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text(content, encoding="utf-8")
-        return ToolResult(
-            tool_name="write_file",
-            output=f"Written {len(content)} chars to {path}",
-            success=True,
-        )
+        return ToolResult(tool_name="write_file", output=f"Written {len(content)} chars to {path}",
+                          success=True)
     except Exception as e:
         return ToolResult(tool_name="write_file", output="", success=False, error=str(e))
 

@@ -85,9 +85,16 @@ class LLMRouter:
         return msg.content or ""
 
     async def _chat_gemini(self, messages: list[dict]) -> str:
-        prompt = "\n".join(f"{m['role']}: {m['content']}" for m in messages)
+        # Gemini uses "user"/"model" roles; map system+user → "user", assistant → "model"
+        contents = [
+            {
+                "role": "model" if m["role"] == "assistant" else "user",
+                "parts": [{"text": m["content"]}],
+            }
+            for m in messages
+        ]
         response = await self._gemini.aio.models.generate_content(
             model="gemini-2.0-flash",
-            contents=prompt,
+            contents=contents,
         )
         return response.text

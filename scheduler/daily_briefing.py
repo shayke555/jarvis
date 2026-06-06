@@ -21,7 +21,7 @@ def set_context_manager(cm: ContextManager) -> None:
 async def send_telegram_message(text: str) -> None:
     # H1: token never logged — kept in variable, not in any logged string
     url = f"https://api.telegram.org/bot{settings.telegram_bot_token}/sendMessage"
-    payload = {"chat_id": settings.telegram_shay_chat_id, "text": text}
+    payload = {"chat_id": settings.telegram_owner_chat_id, "text": text}
     try:
         timeout = httpx.Timeout(connect=5.0, read=10.0, write=5.0, pool=5.0)
         async with httpx.AsyncClient(timeout=timeout) as client:

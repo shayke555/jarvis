@@ -1,6 +1,9 @@
+import logging
 import yaml
 from pathlib import Path
 from brain.memory.sqlite_store import SQLiteStore
+
+logger = logging.getLogger(__name__)
 from brain.memory.chroma_store import ChromaStore
 from brain.llm_router import LLMRouter
 
@@ -15,9 +18,16 @@ class ContextManager:
         self._shay_context = self._load_shay_context()
 
     def _load_shay_context(self) -> str:
-        with open(self.SHAY_CONTEXT_PATH, encoding="utf-8") as f:
-            data = yaml.safe_load(f)
-        return yaml.dump(data, default_flow_style=False, allow_unicode=True)
+        try:
+            with open(self.SHAY_CONTEXT_PATH, encoding="utf-8") as f:
+                data = yaml.safe_load(f)
+            return yaml.dump(data, default_flow_style=False, allow_unicode=True)
+        except FileNotFoundError:
+            logger.warning("Context file not found: %s — running without user profile.", self.SHAY_CONTEXT_PATH)
+            return ""
+        except Exception as e:
+            logger.warning("Failed to load context file: %s", e)
+            return ""
 
     def _build_system_prompt(self, relevant_memories: list[dict], preferences: dict[str, str]) -> str:
         parts = [

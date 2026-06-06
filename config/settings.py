@@ -8,9 +8,12 @@ class Settings(BaseSettings):
     groq_api_key: str = ""
     gemini_api_key: str = ""
 
+    # Owner identity (used in agent prompts — never hardcode real name in code)
+    owner_name: str = "User"
+
     # Telegram
     telegram_bot_token: str = ""
-    telegram_shay_chat_id: str = ""
+    telegram_owner_chat_id: str = ""
 
     # Weather
     openweathermap_api_key: str = ""

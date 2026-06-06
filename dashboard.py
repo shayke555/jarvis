@@ -470,7 +470,7 @@ def read_context(project_name: str) -> str:
         from config.settings import settings
         base = Path(settings.projects_base_path)
     except Exception:
-        base = Path("C:/Users/shayg/Projects")
+        base = Path.home() / "Projects"
     path = base / project_name / "context.md"
     if path.exists():
         return path.read_text(encoding="utf-8", errors="replace")
@@ -491,7 +491,7 @@ def embed_project_graph(project_name: str, height: int = 480) -> None:
         from config.settings import settings
         base = Path(settings.projects_base_path)
     except Exception:
-        base = Path("C:/Users/shayg/Projects")
+        base = Path.home() / "Projects"
     graph_html = base / project_name / "graphify-out" / "graph.html"
     if graph_html.exists():
         html_content = graph_html.read_text(encoding="utf-8", errors="replace")
@@ -599,7 +599,7 @@ def get_notifications(projects) -> list[dict]:
         from config.settings import settings
         base = Path(settings.projects_base_path)
     except Exception:
-        base = Path("C:/Users/shayg/Projects")
+        base = Path.home() / "Projects"
     for p in projects:
         if not (base / p.name / "graphify-out" / "graph.json").exists():
             notes.append({

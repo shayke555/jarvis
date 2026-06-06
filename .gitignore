@@ -1,6 +1,7 @@
 # Secrets & credentials
 .env
 *.env.*
+!.env.example
 
 # Personal config (not for public repos)
 config/shay_context.yaml
