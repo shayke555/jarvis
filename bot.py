@@ -10,8 +10,9 @@ from brain.llm_router import LLMRouter
 from brain.task_brain import init_task_brain, get_tasks
 from connectors.registry import register
 from interfaces.telegram_bot import run_telegram_bot, set_context_manager, set_agent_loop
-from scheduler.daily_briefing import create_scheduler
+from scheduler.daily_briefing import create_scheduler, send_telegram_message
 from scheduler.weekly_learning import weekly_learning_job
+from scheduler.proactive_nudge import proactive_nudge_job
 from tools.registry import ToolRegistry
 
 logging.basicConfig(
@@ -41,6 +42,14 @@ async def main() -> None:
         hour=8,
         minute=0,
         id="weekly_learning",
+    )
+    scheduler.add_job(
+        proactive_nudge_job,
+        "cron",
+        hour=9,
+        minute=0,
+        id="proactive_nudge",
+        args=[cm, send_telegram_message],
     )
     scheduler.start()
     logger.info("JARVIS starting — Telegram + AgentLoop + TaskBrain online.")

@@ -1,10 +1,13 @@
 """Project health monitor — scans context.md across all projects."""
 from __future__ import annotations
 
+import logging
 import re
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 from config.settings import settings
 
@@ -67,6 +70,51 @@ def scan_projects(projects_base: Path | None = None) -> list[ProjectStatus]:
         ))
 
     return sorted(results, key=lambda p: p.staleness_days, reverse=True)
+
+
+def detect_stuck_projects(
+    threshold_days: int = 5,
+    projects_base: Path | None = None,
+) -> list[dict]:
+    """Return projects that are stale AND have known pending work.
+
+    A project is "stuck" when context.md hasn't been touched for threshold_days
+    AND its Next Step section is non-empty. Cross-references task_brain for
+    urgent/high tasks when available.
+
+    Returns list of {project, days_stale, next_step, urgent_tasks}.
+    """
+    from brain import task_brain
+
+    statuses = scan_projects(projects_base)
+    stuck = []
+
+    for p in statuses:
+        if p.staleness_days < threshold_days:
+            continue
+        if not p.next_step:
+            continue
+
+        try:
+            all_tasks = task_brain.get_tasks()
+            project_tasks = [
+                t for t in all_tasks
+                if t.get("area", "").lower() in p.name.lower()
+                and t.get("status", "") != "done"
+                and t.get("priority", "").lower() in ("high", "urgent", "critical")
+            ]
+        except Exception as e:
+            logger.warning("task_brain unavailable for %s: %s", p.name, e)
+            project_tasks = []
+
+        stuck.append({
+            "project": p.name,
+            "days_stale": p.staleness_days,
+            "next_step": p.next_step,
+            "urgent_tasks": project_tasks,
+        })
+
+    return stuck
 
 
 def format_project_health(projects_base: Path | None = None) -> str:

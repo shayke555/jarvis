@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import uuid
 
 from fastapi import FastAPI
-from telegram import Update
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import (
     Application,
     ApplicationBuilder,
+    CallbackQueryHandler,
     CommandHandler,
     ContextTypes,
     MessageHandler,
@@ -23,6 +25,9 @@ logger = logging.getLogger(__name__)
 
 _context_manager: ContextManager | None = None
 _agent_loop: AgentLoop | None = None
+
+# Approval gate: maps request_id → asyncio.Future[bool]
+_pending_approvals: dict[str, asyncio.Future[bool]] = {}
 _stop_event: asyncio.Event | None = None
 
 
@@ -36,6 +41,101 @@ def set_agent_loop(agent: AgentLoop) -> None:
     _agent_loop = agent
 
 
+async def request_approval(tool_name: str, args: dict) -> bool:
+    """Send an inline-keyboard approve/reject prompt to the owner and await their response.
+
+    Returns True if approved, False if rejected or timed out.
+    Only callable when a Telegram update is in scope — used as on_approval_request
+    callback passed into AgentLoop.run().
+    """
+    request_id = uuid.uuid4().hex  # 32 chars — eliminates collision risk
+    loop = asyncio.get_event_loop()
+    future: asyncio.Future[bool] = loop.create_future()
+    _pending_approvals[request_id] = future
+
+    # Format args for display — truncate long values
+    args_preview = ", ".join(
+        f"{k}={str(v)[:40]!r}" for k, v in list(args.items())[:3]
+    )
+    text = (
+        f"⚠️ JARVIS רוצה להריץ כלי מסוכן:\n"
+        f"🔧 `{tool_name}({args_preview})`\n\n"
+        f"אשר את הפעולה?"
+    )
+    keyboard = InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("✅ אשר", callback_data=f"approve:{request_id}"),
+            InlineKeyboardButton("❌ דחה", callback_data=f"reject:{request_id}"),
+        ]
+    ])
+
+    try:
+        bot = _get_bot()  # raises RuntimeError if called before run_telegram_bot() completes initialize()
+        await bot.send_message(
+            chat_id=settings.telegram_owner_chat_id,
+            text=text,
+            reply_markup=keyboard,
+            parse_mode="Markdown",
+        )
+        approved = await asyncio.wait_for(
+            future,
+            timeout=settings.approval_gate_timeout_seconds,
+        )
+        return approved
+    except asyncio.TimeoutError:
+        logger.warning("Approval gate timed out for %s — defaulting to reject", tool_name)
+        return False
+    except Exception as e:
+        logger.error("Approval gate error for %s: %s", tool_name, e, exc_info=True)
+        return False
+    finally:
+        _pending_approvals.pop(request_id, None)
+
+
+async def handle_approval_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Resolve a pending approval Future when the owner taps ✅ or ❌."""
+    query = update.callback_query
+    if query is None:
+        return
+
+    # Only the owner can approve/reject
+    if str(query.from_user.id) != settings.telegram_owner_chat_id:
+        await query.answer("Unauthorized")
+        return
+
+    data = query.data or ""
+    if not (data.startswith("approve:") or data.startswith("reject:")):
+        return
+
+    action, request_id = data.split(":", 1)
+    approved = action == "approve"
+
+    future = _pending_approvals.get(request_id)
+    if future and not future.done():
+        future.set_result(approved)
+        label = "✅ אושר" if approved else "❌ נדחה"
+        original_text = (getattr(query.message, "text", "") or "") if query.message else ""
+        await query.edit_message_text(f"{original_text}\n\n{label}".strip())
+    else:
+        await query.answer("הבקשה כבר טופלה או פגה תוקף.")
+
+    await query.answer()
+
+
+_bot_ref: object = None
+
+
+def _set_bot(bot: object) -> None:
+    global _bot_ref
+    _bot_ref = bot
+
+
+def _get_bot():
+    if _bot_ref is None:
+        raise RuntimeError("Bot not initialized — call _set_bot() first.")
+    return _bot_ref
+
+
 def _get_context_manager() -> ContextManager:
     if _context_manager is None:
         raise RuntimeError("ContextManager not initialized. Call set_context_manager() first.")
@@ -43,6 +143,8 @@ def _get_context_manager() -> ContextManager:
 
 
 def _is_authorized(update: Update) -> bool:
+    if update.effective_user is None:
+        return False
     return str(update.effective_user.id) == settings.telegram_owner_chat_id
 
 
@@ -181,6 +283,74 @@ async def handle_organize(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     await update.message.reply_text(result.output)
 
 
+async def handle_jobs(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not _is_authorized(update):
+        await _reject_unauthorized(update, context)
+        return
+
+    from connectors.cv_bridge import fetch_cv_status
+    result = fetch_cv_status()
+
+    if result["status"] == "error":
+        await update.message.reply_text(f"❌ לא הצלחתי לטעון נתוני קריירה: {result['error']}")
+        return
+
+    data = result["data"]
+    total = data.get("total", 0)
+    apps = data.get("open_applications", [])
+    pipeline = data.get("pipeline_summary", {})
+
+    if total == 0:
+        await update.message.reply_text("💼 אין מועמדויות פתוחות כרגע.")
+        return
+
+    lines = [f"💼 מועמדויות פתוחות ({total}):\n"]
+    for app in apps[:10]:
+        status = app.get("status", "?")
+        company = app.get("company", "?")
+        role = app.get("role", "?")
+        date_applied = app.get("date_applied", "?")
+        lines.append(f"  • {company} — {role} [{status}] ({date_applied})")
+
+    if total > 10:
+        lines.append(f"\n  ...ועוד {total - 10} נוספות")
+
+    await update.message.reply_text("\n".join(lines))
+
+
+async def handle_signals(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not _is_authorized(update):
+        await _reject_unauthorized(update, context)
+        return
+
+    from connectors.ledger_bridge import fetch_ledger_signals
+    result = fetch_ledger_signals()
+
+    if result["status"] == "error":
+        await update.message.reply_text(f"❌ LedgerAlpha לא זמין: {result['error']}")
+        return
+
+    data = result["data"]
+    regime = data.get("regime", "unknown")
+    top = data.get("top_signal")
+    timestamp = data.get("timestamp", "")
+
+    lines = [f"📈 LedgerAlpha Signals\n", f"🌡️ Regime: {regime}"]
+    if timestamp:
+        lines.append(f"🕐 עודכן: {timestamp}")
+
+    if top:
+        ticker = top.get("ticker", "?")
+        score = top.get("score", "?")
+        direction = top.get("direction", "?")
+        lines.append(f"\n🏆 איתות מוביל:")
+        lines.append(f"  {ticker} — {direction} (score: {score})")
+    else:
+        lines.append("\nאין איתותים זמינים כרגע.")
+
+    await update.message.reply_text("\n".join(lines))
+
+
 def _route_task_command(text: str) -> str | None:
     """
     Detect task-related commands and handle directly (no LLM call).
@@ -234,7 +404,14 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         async def _notify(tool_info: str) -> None:
             await update.message.reply_text(tool_info)
 
-        response = await _agent_loop.run(messages=messages, on_tool_call=_notify)
+        async def _approve(tool_name: str, args: dict) -> bool:
+            return await request_approval(tool_name, args)
+
+        response = await _agent_loop.run(
+            messages=messages,
+            on_tool_call=_notify,
+            on_approval_request=_approve,
+        )
         cm.sqlite.add_message("telegram", "user", user_message)
         cm.sqlite.add_message("telegram", "assistant", response)
     else:
@@ -301,10 +478,14 @@ async def run_telegram_bot() -> None:
     application.add_handler(CommandHandler("remember", handle_remember))
     application.add_handler(CommandHandler("summarize", handle_summarize))
     application.add_handler(CommandHandler("organize", handle_organize))
+    application.add_handler(CommandHandler("jobs", handle_jobs))
+    application.add_handler(CommandHandler("signals", handle_signals))
+    application.add_handler(CallbackQueryHandler(handle_approval_callback, pattern="^(approve|reject):"))
     application.add_handler(MessageHandler(filters.VOICE | filters.AUDIO, handle_voice))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
 
     await application.initialize()
+    _set_bot(application.bot)
     await application.start()
     await application.updater.start_polling(drop_pending_updates=False)
     logger.info("Telegram bot polling started.")

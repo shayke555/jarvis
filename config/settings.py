@@ -40,6 +40,10 @@ class Settings(BaseSettings):
     gmail_email: str = ""
     gmail_app_password: str = ""  # Google App Password (not account password)
 
+    # Approval Gate — Phase 2
+    approval_gate_enabled: bool = True
+    approval_gate_timeout_seconds: int = 60
+
     # Voice
     wake_word: str = "hey jarvis"
     voice_enabled: bool = False
