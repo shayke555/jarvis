@@ -5,43 +5,6 @@ import random
 from pathlib import Path
 
 
-# ── Chat helpers ─────────────────────────────────────────────────────────────
-
-def build_chat_messages(
-    project_name: str,
-    context_text: str,
-    history: list[dict],
-) -> list[dict]:
-    """Build Groq messages from project context + last 10 turns of history."""
-    system = (
-        f"אתה JARVIS, העוזר האישי של שי. מומחה לפרויקט {project_name}. "
-        "ענה בקצרה ובישירות. התאם שפה למשתמש (עברית/אנגלית). ענה רק על מה שנשאל.\n\n"
-        f"=== CONTEXT: {project_name} ===\n{context_text[:3000]}"
-    )
-    msgs: list[dict] = [{"role": "system", "content": system}]
-    msgs.extend(history[-10:])
-    return msgs
-
-
-def call_groq_chat(messages: list[dict]) -> str:
-    """Send messages to Groq and return reply. Returns error string on failure."""
-    try:
-        from config.settings import settings  # type: ignore[import]
-        if not settings.groq_api_key:
-            return "⚠️ GROQ_API_KEY not set"
-        from groq import Groq  # type: ignore[import]
-        client = Groq(api_key=settings.groq_api_key)
-        resp = client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
-            messages=messages,
-            max_tokens=400,
-            temperature=0.7,
-        )
-        return resp.choices[0].message.content.strip()
-    except Exception as e:
-        return f"⚠️ {type(e).__name__}: request failed"
-
-
 # ── Skills index ─────────────────────────────────────────────────────────────
 
 _SKIP_SKILL_DIRS = {
