@@ -7,6 +7,16 @@ from config.settings import settings
 
 logger = logging.getLogger(__name__)
 
+_SIMPLE_QUERY_KEYWORDS = {
+    "תודה", "אוקי", "בסדר", "שלום", "היי", "מה שלומך",
+    "ok", "thanks", "hi", "hello", "yes", "no",
+}
+
+_COMPLEX_KEYWORDS = {
+    "analyze", "explain", "compare", "summarize", "research", "plan",
+    "נתח", "הסבר", "השווה", "סכם", "חקור", "תכנן", "בנה", "צור",
+}
+
 
 class LLMRouter:
     def __init__(self) -> None:
@@ -21,18 +31,32 @@ class LLMRouter:
             return "gemini"
         return "groq"
 
+    def is_simple_query(self, messages: list[dict]) -> bool:
+        """Return True ONLY for clearly conversational, no-tool queries → use fast model.
+        Conservative: default False to avoid silently downgrading complex queries."""
+        last = messages[-1].get("content", "") if messages else ""
+        if len(last) > 100:
+            return False
+        lower = last.lower()
+        if any(kw in lower for kw in _COMPLEX_KEYWORDS):
+            return False
+        # Only route to fast model on explicit conversational keywords
+        return any(kw in lower for kw in _SIMPLE_QUERY_KEYWORDS)
+
     async def chat(self, messages: list[dict], context_tokens: int = 0) -> str:
         backend = self.route(messages, context_tokens)
         if backend == "groq":
             try:
                 return await self._chat_groq(messages)
             except groq_module.RateLimitError:
+                logger.warning("Groq rate limit hit — falling back to Gemini")
                 return await self._chat_gemini(messages)
         return await self._chat_gemini(messages)
 
-    async def _chat_groq(self, messages: list[dict]) -> str:
+    async def _chat_groq(self, messages: list[dict], fast: bool = False) -> str:
+        model = settings.groq_fast_model if fast else settings.groq_model
         response = await self._groq.chat.completions.create(
-            model="llama-3.3-70b-versatile",
+            model=model,
             messages=messages,
             temperature=0.7,
             max_tokens=2048,
@@ -57,13 +81,16 @@ class LLMRouter:
 
         try:
             response = await self._groq.chat.completions.create(
-                model="llama-3.3-70b-versatile",
+                model=settings.groq_model,
                 messages=messages,
                 tools=tools if tools else None,
                 tool_choice="auto" if tools else None,
                 temperature=0.7,
                 max_tokens=2048,
             )
+        except groq_module.RateLimitError:
+            logger.warning("Groq rate limit on tool call — falling back to plain chat")
+            return await self._chat_groq(messages)
         except Exception as e:
             logger.warning("Groq tool_use failed, falling back to plain chat: %s", e)
             return await self._chat_groq(messages)
@@ -85,7 +112,6 @@ class LLMRouter:
         return msg.content or ""
 
     async def _chat_gemini(self, messages: list[dict]) -> str:
-        # Gemini uses "user"/"model" roles; map system+user → "user", assistant → "model"
         contents = [
             {
                 "role": "model" if m["role"] == "assistant" else "user",

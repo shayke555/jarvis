@@ -13,8 +13,8 @@ READ_FILE_SCHEMA = {
     "function": {
         "name": "read_file",
         "description": (
-            "Read the contents of a local file. "
-            "Use when asked to read, analyze, or summarize a document or code file."
+            "Read the contents of a plain-text local file (.py, .txt, .json, .md, .yaml, .env, source code). "
+            "NOT for PDFs or Word docs — use read_document for those binary formats."
         ),
         "parameters": {
             "type": "object",
@@ -51,7 +51,7 @@ LIST_DIR_SCHEMA = {
     "type": "function",
     "function": {
         "name": "list_dir",
-        "description": "List files and directories at a given path.",
+        "description": "List files and directories at a given path. Use before read_file to discover what files exist, or when asked what's in a folder.",
         "parameters": {
             "type": "object",
             "properties": {

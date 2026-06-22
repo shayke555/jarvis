@@ -24,10 +24,10 @@ ORGANIZE_FILES_SCHEMA = {
     "function": {
         "name": "organize_files",
         "description": (
-            "Propose a plan for organizing files in a local folder — groups by type, "
-            "modification date, or filename keyword. DRY-RUN ONLY: returns a proposed "
-            "plan of moves, does not touch the filesystem. Use when asked to organize, "
-            "tidy up, sort, or clean up a folder of documents/downloads/notes."
+            "SAFE, READ-ONLY: Propose a plan for organizing files in a folder — groups by type, "
+            "modification date, or filename keyword. Returns a proposed plan ONLY, never moves files. "
+            "Always run this FIRST to show the user the plan before executing. "
+            "Use when asked to organize, tidy up, sort, or clean up a folder."
         ),
         "parameters": {
             "type": "object",

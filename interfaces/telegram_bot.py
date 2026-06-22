@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import uuid
+from datetime import datetime
 
 from fastapi import FastAPI
 from telegram import Bot, InlineKeyboardButton, InlineKeyboardMarkup, Update
@@ -189,13 +190,54 @@ async def handle_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     await update.message.reply_text(text)
 
 
+async def handle_ping(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not _is_authorized(update):
+        await _reject_unauthorized(update, context)
+        return
+    cm = _get_context_manager()
+    blocks = cm.sqlite.get_all_blocks()
+    block_count = len(blocks)
+    now = datetime.now().strftime("%H:%M:%S")
+    await update.message.reply_text(
+        f"🟢 JARVIS online · {now}\n"
+        f"🧠 {block_count} memory blocks\n"
+        f"✅ כל המערכות תקינות"
+    )
+
+
 async def handle_brief(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not _is_authorized(update):
         await _reject_unauthorized(update, context)
         return
+    await update.message.reply_text("📋 מכין בריפינג...")
+    try:
+        from scheduler.daily_briefing import build_briefing
+        text = await build_briefing()
+        await update.message.reply_text(_format_for_telegram(text))
+    except Exception as e:
+        logger.error("handle_brief failed: %s", e, exc_info=True)
+        await update.message.reply_text(f"❌ שגיאה בבניית הבריפינג: {e}")
+
+
+async def handle_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not _is_authorized(update):
+        await _reject_unauthorized(update, context)
+        return
     await update.message.reply_text(
-        "Morning briefing on demand — coming in Phase C (connectors not yet available). "
-        "Use /status for now."
+        "🤖 *JARVIS — פקודות זמינות*\n\n"
+        "/start — הפעלת JARVIS\n"
+        "/ping — בדיקת מצב המערכת\n"
+        "/status — סטטוס זיכרון + משימות\n"
+        "/brief — בריפינג בוקר עכשיו\n"
+        "/remember `<טקסט>` — שמור עובדה בזיכרון\n"
+        "/summarize `<path>` — סיכום מסמך PDF/DOCX/TXT\n"
+        "/organize `<folder>` — תוכנית ארגון תיקייה\n"
+        "/jobs — מועמדויות פתוחות\n"
+        "/signals — איתותי LedgerAlpha\n"
+        "/gmail — מיילים חדשים מסווגים\n"
+        "/help — הצגת פקודות אלו\n\n"
+        "💬 _כל הודעה חופשית_ — agent עם tool use",
+        parse_mode="Markdown",
     )
 
 
@@ -336,20 +378,26 @@ async def handle_signals(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     top = data.get("top_signal")
     timestamp = data.get("timestamp", "")
 
-    lines = [f"📈 LedgerAlpha Signals\n", f"🌡️ Regime: {regime}"]
-    if timestamp:
-        lines.append(f"🕐 עודכן: {timestamp}")
+    all_signals = data.get("all_signals", [])
+    signal_count = data.get("signal_count", 0)
 
-    if top:
-        ticker = top.get("ticker", "?")
-        score = top.get("score", "?")
-        direction = top.get("direction", "?")
-        lines.append(f"\n🏆 איתות מוביל:")
-        lines.append(f"  {ticker} — {direction} (score: {score})")
+    regime_emoji = {"bullish": "🟢", "bearish": "🔴"}.get(regime, "🟡")
+    lines = [f"📈 *LedgerAlpha Signals*", f"{regime_emoji} Regime: `{regime.upper()}`"]
+    if timestamp:
+        lines.append(f"🕐 {timestamp} · {signal_count} signals")
+
+    if all_signals:
+        lines.append("\n*Top 5 איתותים:*")
+        for sig in all_signals[:5]:
+            t = sig.get("ticker", "?")
+            s = sig.get("score", "?")
+            dr = sig.get("direction", "?")
+            dr_emoji = "🔼" if dr == "long" else "🔽"
+            lines.append(f"  {dr_emoji} `{t}` — {dr} (score: {s})")
     else:
         lines.append("\nאין איתותים זמינים כרגע.")
 
-    await update.message.reply_text("\n".join(lines))
+    await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
 
 
 async def handle_gmail(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -416,6 +464,15 @@ def _route_task_command(text: str) -> str | None:
     return None
 
 
+def _format_for_telegram(text: str, max_len: int = 4090) -> str:
+    """Trim to Telegram's 4096-char limit (conservative 4090 for safety + ellipsis)."""
+    if len(text) <= max_len:
+        return text
+    cut = text[:max_len].rfind("\n")
+    end = cut if cut > max_len // 2 else max_len
+    return text[:end] + "\n…"
+
+
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not _is_authorized(update):
         await _reject_unauthorized(update, context)
@@ -427,6 +484,12 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     if task_reply is not None:
         await update.message.reply_text(task_reply)
         return
+
+    # Show typing indicator — user sees activity immediately
+    await context.bot.send_chat_action(
+        chat_id=update.effective_chat.id,
+        action="typing",
+    )
 
     cm = _get_context_manager()
 
@@ -449,7 +512,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     else:
         response = await cm.chat(user_message, interface="telegram")
 
-    await update.message.reply_text(response)
+    await update.message.reply_text(_format_for_telegram(response))
 
 
 async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -505,6 +568,8 @@ async def run_telegram_bot() -> None:
 
     application.add_handler(MessageHandler(filters.ALL, _debug_all), group=-1)
     application.add_handler(CommandHandler("start", handle_start))
+    application.add_handler(CommandHandler("ping", handle_ping))
+    application.add_handler(CommandHandler("help", handle_help))
     application.add_handler(CommandHandler("status", handle_status))
     application.add_handler(CommandHandler("brief", handle_brief))
     application.add_handler(CommandHandler("remember", handle_remember))
@@ -519,6 +584,22 @@ async def run_telegram_bot() -> None:
 
     await application.initialize()
     _set_bot(application.bot)
+
+    # Register command autocomplete — enables "/" menu in Telegram
+    from telegram import BotCommand
+    await application.bot.set_my_commands([
+        BotCommand("start",     "הפעלת JARVIS"),
+        BotCommand("ping",      "בדיקת מצב המערכת"),
+        BotCommand("help",      "רשימת כל הפקודות"),
+        BotCommand("status",    "סטטוס זיכרון + משימות"),
+        BotCommand("brief",     "בריפינג בוקר עכשיו"),
+        BotCommand("remember",  "שמור עובדה בזיכרון"),
+        BotCommand("summarize", "סיכום מסמך PDF/DOCX"),
+        BotCommand("organize",  "תוכנית ארגון תיקייה"),
+        BotCommand("jobs",      "מועמדויות פתוחות"),
+        BotCommand("signals",   "איתותי LedgerAlpha"),
+        BotCommand("gmail",     "מיילים חדשים מסווגים"),
+    ])
     await application.start()
     await application.updater.start_polling(drop_pending_updates=False)
     logger.info("Telegram bot polling started.")

@@ -1,5 +1,6 @@
 import logging
 import yaml
+from datetime import datetime
 from pathlib import Path
 from brain.memory.sqlite_store import SQLiteStore
 from config.settings import settings
@@ -63,8 +64,15 @@ class ContextManager:
         persona_blocks = self.sqlite.get_all_blocks("persona")
         project_blocks = self.sqlite.get_all_blocks("project")
 
+        now = datetime.now()
+        date_str = now.strftime("%A, %d %B %Y, %H:%M")
         parts = [
             f"You are JARVIS, {settings.owner_name}'s personal AI assistant. You know him deeply and evolve as you learn more.",
+            f"Current date and time: {date_str}. Location: Israel (UTC+3).",
+            "If you don't know something factual → use web_search, never guess.",
+            "For market/trading data → use the signals tool, never invent prices.",
+            "For files/documents → use read_document or read_file, never invent content.",
+            "When uncertain → say 'אני לא בטוח, תרצה שאחפש?' before answering.",
         ]
 
         if persona_blocks:
@@ -125,7 +133,11 @@ class ContextManager:
         messages.append({"role": "user", "content": user_message})
 
         context_tokens = sum(len(m["content"]) // 4 for m in messages)
-        response = await self.llm.chat(messages, context_tokens=context_tokens)
+        # Use fast model for short conversational queries — no tools, no research
+        if self.llm.is_simple_query(messages):
+            response = await self.llm._chat_groq(messages, fast=True)
+        else:
+            response = await self.llm.chat(messages, context_tokens=context_tokens)
 
         self.sqlite.add_message(interface, "assistant", response)
 

@@ -22,17 +22,16 @@ def fetch_ledger_signals() -> dict:
         regime_data = json.loads(regime_path.read_text(encoding="utf-8"))
         signals_data = json.loads(signals_path.read_text(encoding="utf-8"))
 
-        top_signal = (
-            signals_data[0]
-            if isinstance(signals_data, list) and signals_data
-            else None
-        )
+        all_signals = signals_data if isinstance(signals_data, list) else []
+        top_signal = all_signals[0] if all_signals else None
 
         return {
             "status": "ok",
             "data": {
                 "regime": regime_data.get("regime", "unknown"),
                 "top_signal": top_signal,
+                "all_signals": all_signals[:20],  # cap at 20 for display
+                "signal_count": len(all_signals),
                 "timestamp": regime_data.get("timestamp", ""),
             },
             "error": None,

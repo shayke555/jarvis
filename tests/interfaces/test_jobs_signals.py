@@ -80,14 +80,17 @@ async def test_signals_reports_ledger_error():
 @pytest.mark.asyncio
 async def test_signals_shows_regime_and_top_signal():
     update = _make_update("/signals")
+    signals = [{"ticker": "AAPL", "score": 0.92, "direction": "long"}]
     data = {
         "regime": "bullish",
-        "top_signal": {"ticker": "AAPL", "score": 0.92, "direction": "long"},
+        "top_signal": signals[0],
+        "all_signals": signals,
+        "signal_count": 1,
         "timestamp": "2026-06-01T09:00:00",
     }
     with patch("connectors.ledger_bridge.fetch_ledger_signals",
                return_value={"status": "ok", "data": data, "error": None}):
         await handle_signals(update, MagicMock())
     reply = update.message.reply_text.call_args[0][0]
-    assert "bullish" in reply
+    assert "BULLISH" in reply  # now uppercased
     assert "AAPL" in reply

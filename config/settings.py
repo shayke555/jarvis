@@ -7,6 +7,8 @@ class Settings(BaseSettings):
     # LLM
     groq_api_key: str = ""
     gemini_api_key: str = ""
+    groq_model: str = "llama-3.3-70b-versatile"   # override via GROQ_MODEL in .env
+    groq_fast_model: str = "llama-3.1-8b-instant"  # for simple/fast queries
 
     # Owner identity (used in agent prompts — never hardcode real name in code)
     owner_name: str = "Shay"

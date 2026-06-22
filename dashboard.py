@@ -9,6 +9,7 @@ import json
 import random
 import sys
 import threading
+from collections import Counter
 from datetime import datetime
 from pathlib import Path
 
@@ -27,6 +28,7 @@ from dashboard_utils import (
     get_project_summary,
     get_random_skills,
     load_cv_status,
+    load_gmail_summary,
     load_ledger,
     load_projects,
     load_skills_index,
@@ -130,7 +132,7 @@ project_map = {p.name: p for p in projects}
 tab_labels  = ["🏠 Overview"] + [
     f"{PROJECT_ICONS.get(p.name,'📁')} {p.name.replace('PROJECT-','')}"
     for p in projects
-] + ["💼 קריירה", "📈 מניות"]
+] + ["💼 קריירה", "📈 מניות", "📧 מייל"]
 tabs = st.tabs(tab_labels)
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -419,32 +421,65 @@ if user_input := st.chat_input("דבר עם JARVIS..."):
 # ══════════════════════════════════════════════════════════════════════════════
 # TAB N+1 — CAREER (💼 קריירה)
 # ══════════════════════════════════════════════════════════════════════════════
+_STATUS_COLORS = {
+    "applied":     ("var(--cyan)",   "🔵"),
+    "interviewing":("var(--amber)",  "🟡"),
+    "offered":     ("var(--mint)",   "🟢"),
+    "rejected":    ("var(--coral)",  "🔴"),
+}
+
 with tabs[len(projects) + 1]:
     st.markdown('<div class="section-label">מועמדויות פתוחות</div>', unsafe_allow_html=True)
     cv_data = load_cv_status()
     if cv_data["status"] == "error":
         st.warning(f"⚠️ {cv_data['error']}")
     elif not cv_data["data"] or cv_data["data"].get("total", 0) == 0:
-        st.info("אין מועמדויות פתוחות כרגע.")
+        st.markdown("""
+<div class="card" style="text-align:center;padding:36px 20px;">
+  <div style="font-size:2rem;opacity:.4;margin-bottom:8px;">💼</div>
+  <div style="font-family:var(--mono);font-size:.72rem;color:var(--text-mute);">
+    אין מועמדויות פתוחות — הוסף ב-PROJECT-CV
+  </div>
+</div>""", unsafe_allow_html=True)
     else:
         data = cv_data["data"]
         apps = data.get("open_applications", [])
         total = data.get("total", 0)
-        st.markdown(f"**{total} מועמדויות פתוחות**")
-        for app in apps[:20]:
+
+        # Summary stats
+        status_counts = Counter(a.get("status", "?") for a in apps)
+        stat_cols = st.columns(len(status_counts) or 1)
+        for i, (s, count) in enumerate(sorted(status_counts.items())):
+            color, emoji = _STATUS_COLORS.get(s, ("var(--text-dim)", "⚪"))
+            with stat_cols[i % len(stat_cols)]:
+                st.markdown(f"""
+<div class="card" style="text-align:center;padding:14px;">
+  <div style="font-size:1.5rem;">{emoji}</div>
+  <div style="font-family:var(--mono);font-size:1.2rem;font-weight:700;color:{color};">{count}</div>
+  <div style="font-family:var(--mono);font-size:.65rem;color:var(--text-mute);">{s.upper()}</div>
+</div>""", unsafe_allow_html=True)
+
+        # Filter
+        filter_status = st.selectbox("סנן לפי סטטוס", ["הכל"] + sorted(status_counts.keys()), key="cv_filter")
+        filtered = apps if filter_status == "הכל" else [a for a in apps if a.get("status") == filter_status]
+
+        st.markdown(f'<div class="section-label" style="margin-top:16px;">{len(filtered)} מועמדויות</div>', unsafe_allow_html=True)
+        for app in filtered[:20]:
             company = app.get("company", "?")
             role = app.get("role", "?")
             status = app.get("status", "?")
             date_applied = app.get("date_applied", "?")
+            color, emoji = _STATUS_COLORS.get(status, ("var(--text-dim)", "⚪"))
             st.markdown(f"""
-<div class="card" style="padding:12px 18px;margin-bottom:8px;">
+<div class="card" style="padding:12px 18px;margin-bottom:8px;border-left:3px solid {color};">
   <div style="display:flex;justify-content:space-between;align-items:center;">
     <div>
       <span style="font-weight:600;">{company}</span>
       <span style="color:var(--text-dim);margin-left:8px;font-size:.85rem;">{role}</span>
     </div>
-    <div style="font-family:var(--mono);font-size:.72rem;color:var(--text-mute);">
-      [{status}] {date_applied}
+    <div style="font-family:var(--mono);font-size:.72rem;">
+      <span style="color:{color};">{emoji} {status}</span>
+      <span style="color:var(--text-mute);margin-left:8px;">{date_applied}</span>
     </div>
   </div>
 </div>""", unsafe_allow_html=True)
@@ -465,6 +500,8 @@ with tabs[len(projects) + 2]:
         timestamp = d.get("timestamp", "")
 
         col1, col2 = st.columns(2)
+        all_signals = d.get("all_signals", [])
+        signal_count = d.get("signal_count", 0)
         with col1:
             regime_color = {"bullish": "var(--mint)", "bearish": "var(--coral)"}.get(regime, "var(--amber)")
             st.markdown(f"""
@@ -473,7 +510,9 @@ with tabs[len(projects) + 2]:
   <div class="card-value" style="font-size:1.4rem;font-weight:700;color:{regime_color};">
     {regime.upper()}
   </div>
-  <div style="font-family:var(--mono);font-size:.68rem;color:var(--text-mute);margin-top:6px;">{timestamp}</div>
+  <div style="font-family:var(--mono);font-size:.68rem;color:var(--text-mute);margin-top:6px;">
+    {timestamp} · {signal_count} signals
+  </div>
 </div>""", unsafe_allow_html=True)
         with col2:
             if top:
@@ -488,6 +527,55 @@ with tabs[len(projects) + 2]:
   <div style="font-family:var(--mono);font-size:.78rem;color:{dir_color};margin-top:4px;">
     {direction.upper()} · score: {score}
   </div>
+</div>""", unsafe_allow_html=True)
+
+        if all_signals:
+            st.markdown('<div class="section-label" style="margin-top:20px;">כל האיתותים</div>', unsafe_allow_html=True)
+            for sig in all_signals:
+                t = sig.get("ticker", "?")
+                s = sig.get("score", "?")
+                dr = sig.get("direction", "?")
+                dr_color = "var(--mint)" if dr == "long" else "var(--coral)"
+                score_pct = int(float(s) * 100) if isinstance(s, (int, float)) else 0
+                st.markdown(f"""
+<div class="notif-item notif-info" style="margin-bottom:5px;">
+  <span style="font-family:var(--mono);font-weight:600;min-width:60px;">{t}</span>
+  <span style="color:{dr_color};font-family:var(--mono);font-size:.78rem;margin-left:12px;">{dr.upper()}</span>
+  <span style="margin-left:auto;font-family:var(--mono);font-size:.72rem;color:var(--text-dim);">score: {s}</span>
+</div>""", unsafe_allow_html=True)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# TAB N+3 — GMAIL (📧 מייל)
+# ══════════════════════════════════════════════════════════════════════════════
+with tabs[len(projects) + 3]:
+    st.markdown('<div class="section-label">מיילים מסווגים</div>', unsafe_allow_html=True)
+    gmail = load_gmail_summary()
+    if gmail["status"] == "unconfigured":
+        st.info("📧 Gmail לא מוגדר — הוסף GMAIL_EMAIL + GMAIL_APP_PASSWORD ל-.env")
+    elif gmail["status"] == "error":
+        st.warning(f"⚠️ {gmail['error']}")
+    elif not gmail["data"]:
+        st.info("אין מיילים חדשים.")
+    else:
+        data = gmail["data"]
+        scanned = data.get("total_scanned", 0)
+        categories = {
+            "💼 עבודה": data.get("job", []),
+            "💰 כסף": data.get("money", []),
+            "⚡ פעולה נדרשת": data.get("action", []),
+            "📨 ליד": data.get("lead", []),
+        }
+        total = sum(len(v) for v in categories.values())
+        st.markdown(f"**{total} מיילים מעניינים** מתוך {scanned} שנסרקו")
+        for cat_label, items in categories.items():
+            if items:
+                st.markdown(f"**{cat_label}** ({len(items)})")
+                for item in items:
+                    summary = item.get("summary", item.get("company", item.get("role", "?")))
+                    st.markdown(f"""
+<div class="notif-item notif-info" style="margin-bottom:5px;font-size:.84rem;">
+  {summary}
 </div>""", unsafe_allow_html=True)
 
 

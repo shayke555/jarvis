@@ -495,6 +495,17 @@ def load_ledger():
         return {"status": "error", "data": None, "error": str(e)}
 
 
+@st.cache_data(ttl=900, show_spinner=False)
+def load_gmail_summary():
+    try:
+        if not __import__("config.settings", fromlist=["settings"]).settings.gmail_app_password:
+            return {"status": "unconfigured", "data": None, "error": None}
+        from connectors.gmail_bridge import fetch_gmail_summary
+        return fetch_gmail_summary()
+    except Exception as e:
+        return {"status": "error", "data": None, "error": str(e)}
+
+
 @st.cache_data(ttl=300, show_spinner=False)
 def load_cv_status():
     try:
