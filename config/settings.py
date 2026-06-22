@@ -9,7 +9,7 @@ class Settings(BaseSettings):
     gemini_api_key: str = ""
 
     # Owner identity (used in agent prompts — never hardcode real name in code)
-    owner_name: str = "User"
+    owner_name: str = "Shay"
 
     # Telegram
     telegram_bot_token: str = ""

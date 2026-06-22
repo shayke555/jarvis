@@ -72,6 +72,18 @@ class ToolRegistry:
             logger.debug("tools.files not ready — skipping")
 
         try:
+            from tools.document_reader import read_document_tool, READ_DOCUMENT_SCHEMA
+            self.register(READ_DOCUMENT_SCHEMA, read_document_tool)
+        except ImportError:
+            logger.debug("tools.document_reader not ready — skipping")
+
+        try:
+            from tools.organizer import organize_files_tool, ORGANIZE_FILES_SCHEMA
+            self.register(ORGANIZE_FILES_SCHEMA, organize_files_tool)
+        except ImportError:
+            logger.debug("tools.organizer not ready — skipping")
+
+        try:
             from tools.code_runner import run_python_tool, RUN_PYTHON_SCHEMA
             self.register(RUN_PYTHON_SCHEMA, run_python_tool)
         except ImportError:

@@ -40,7 +40,10 @@ class AgentLoop:
             )
 
             if isinstance(response, str):
-                return response
+                if response.strip():
+                    return response
+                logger.warning("LLM returned empty content with no tool calls — retrying without forced tools.")
+                return await self._llm.chat(working, context_tokens=context_tokens)
 
             tool_calls = response.get("tool_calls", [])
             if not tool_calls:

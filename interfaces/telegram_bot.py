@@ -113,6 +113,74 @@ async def handle_remember(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     await update.message.reply_text(f"Stored: {fact}")
 
 
+_SUMMARY_PROMPT = (
+    "You are JARVIS helping Shay prepare for exams. Summarize the following course "
+    "material in Hebrew: extract (1) key topics, (2) important definitions/concepts, "
+    "and (3) 3-5 likely exam questions with short model answers. Be concise and structured.\n\n"
+    "--- MATERIAL ---\n{text}\n--- END MATERIAL ---"
+)
+
+
+async def handle_summarize(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not _is_authorized(update):
+        await _reject_unauthorized(update, context)
+        return
+
+    raw: str = update.message.text or ""
+    parts = raw.split(maxsplit=1)
+    if len(parts) < 2 or not parts[1].strip():
+        await update.message.reply_text("Usage: /summarize <path to PDF/DOCX/TXT/MD>")
+        return
+
+    path = parts[1].strip()
+    await update.message.reply_text(f"📖 קורא את {path}...")
+
+    from tools.document_reader import read_document_tool
+    doc_result = await read_document_tool(path=path)
+    if not doc_result.success:
+        await update.message.reply_text(f"❌ לא הצלחתי לקרוא את הקובץ: {doc_result.error}")
+        return
+
+    cm = _get_context_manager()
+    try:
+        summary = await cm.llm.chat(
+            [{"role": "user", "content": _SUMMARY_PROMPT.format(text=doc_result.output)}],
+            context_tokens=len(doc_result.output) // 4,
+        )
+    except Exception as e:
+        logger.error("Summarization failed for %s: %s", path, e, exc_info=True)
+        await update.message.reply_text("❌ שגיאה ביצירת הסיכום. נסה שוב.")
+        return
+
+    await update.message.reply_text(summary or "לא הצלחתי להפיק סיכום מהחומר הזה.")
+
+
+async def handle_organize(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not _is_authorized(update):
+        await _reject_unauthorized(update, context)
+        return
+
+    raw: str = update.message.text or ""
+    parts = raw.split(maxsplit=2)
+    if len(parts) < 2 or not parts[1].strip():
+        await update.message.reply_text(
+            "Usage: /organize <folder> [by_type|by_date|by_keyword]\n"
+            "(מצב dry-run בלבד — JARVIS עדיין לא יכול להזיז קבצים בפועל)"
+        )
+        return
+
+    folder = parts[1].strip()
+    strategy = parts[2].strip() if len(parts) > 2 and parts[2].strip() else "by_type"
+
+    from tools.organizer import organize_files_tool
+    result = await organize_files_tool(folder=folder, strategy=strategy)
+    if not result.success:
+        await update.message.reply_text(f"❌ {result.error}")
+        return
+
+    await update.message.reply_text(result.output)
+
+
 def _route_task_command(text: str) -> str | None:
     """
     Detect task-related commands and handle directly (no LLM call).
@@ -231,6 +299,8 @@ async def run_telegram_bot() -> None:
     application.add_handler(CommandHandler("status", handle_status))
     application.add_handler(CommandHandler("brief", handle_brief))
     application.add_handler(CommandHandler("remember", handle_remember))
+    application.add_handler(CommandHandler("summarize", handle_summarize))
+    application.add_handler(CommandHandler("organize", handle_organize))
     application.add_handler(MessageHandler(filters.VOICE | filters.AUDIO, handle_voice))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
 

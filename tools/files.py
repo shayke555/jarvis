@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
+from tools.path_guard import safe_path as _safe_path
 from tools.registry import ToolResult
 
 logger = logging.getLogger(__name__)
@@ -60,18 +61,6 @@ LIST_DIR_SCHEMA = {
         },
     },
 }
-
-
-def _safe_path(path: str) -> Path | None:
-    """Resolve path and reject traversal attacks (e.g. ../../etc/passwd)."""
-    from config.settings import settings
-    resolved = Path(path).resolve()
-    base = Path(settings.projects_base_path).resolve() if settings.projects_base_path else None
-    if base and not str(resolved).startswith(str(base)):
-        return None
-    if ".." in Path(path).parts:
-        return None
-    return resolved
 
 
 async def read_file_tool(path: str, max_chars: int = 4000) -> ToolResult:

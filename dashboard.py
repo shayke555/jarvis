@@ -18,8 +18,6 @@ import streamlit as st
 import streamlit.components.v1 as components
 
 from dashboard_utils import (
-    build_chat_messages,
-    call_groq_chat,
     get_cross_project_summary,
     get_random_skills,
     load_skills_index,
@@ -610,6 +608,41 @@ def get_notifications(projects) -> list[dict]:
     return notes
 
 
+# ── JARVIS Brain (shared with Telegram — same memory, same tools) ────────────
+@st.cache_resource(show_spinner=False)
+def get_jarvis_brain():
+    """Single shared ContextManager instance — same memory_blocks, ChromaDB,
+    and LLM routing the Telegram bot uses. Cached across reruns (heavy to build:
+    SQLite + ChromaDB + embeddings)."""
+    from brain.context_manager import ContextManager
+    return ContextManager()
+
+
+def _run_chat(cm, user_message: str) -> str:
+    """Run cm.chat() to completion from Streamlit's sync context.
+    Mirrors the new-event-loop-in-thread pattern used by load_trending() above —
+    Streamlit's main thread already has no running loop, but isolating in a
+    thread keeps repeated chat calls safe across reruns."""
+    result: dict = {}
+
+    def _run():
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            result["reply"] = loop.run_until_complete(cm.chat(user_message, interface="dashboard"))
+        except Exception as e:
+            result["error"] = str(e)
+        finally:
+            loop.close()
+
+    t = threading.Thread(target=_run)
+    t.start()
+    t.join(timeout=120)
+    if "error" in result:
+        return f"⚠️ שגיאה: {result['error']}"
+    return result.get("reply", "⚠️ JARVIS לא הגיב בזמן (timeout).")
+
+
 # ── Bootstrap ─────────────────────────────────────────────────────────────────
 from brain.task_brain import get_dashboard_streak, init_task_brain
 init_task_brain()
@@ -919,39 +952,30 @@ for i, proj in enumerate(projects):
                 )
 
 # ══════════════════════════════════════════════════════════════════════════════
-# GLOBAL CHAT
+# UNIFIED CHAT — same brain as Telegram (memory_blocks, ChromaDB, tools, agent loop)
 # ══════════════════════════════════════════════════════════════════════════════
-if projects:
-    st.markdown('<div class="glow-div" style="margin-top:32px;"></div>', unsafe_allow_html=True)
-    st.markdown('<div class="section-label">💬 Chat with JARVIS</div>', unsafe_allow_html=True)
+st.markdown('<div class="glow-div" style="margin-top:32px;"></div>', unsafe_allow_html=True)
+st.markdown('<div class="section-label">💬 Chat with JARVIS — same brain as Telegram</div>', unsafe_allow_html=True)
+st.caption("שיחה כאן משתפת זיכרון עם הטלגרם — אותו ContextManager, אותם memory blocks, אותם כלים.")
 
-    chat_project = st.selectbox(
-        "Project context:",
-        [p.name for p in projects],
-        key="chat_project_selector",
-        label_visibility="collapsed",
-    )
-    chat_key = f"chat_{chat_project}"
-    if chat_key not in st.session_state:
-        st.session_state[chat_key] = []
+if "jarvis_chat_history" not in st.session_state:
+    st.session_state.jarvis_chat_history = []
 
-    for msg in st.session_state[chat_key]:
-        with st.chat_message(msg["role"]):
-            st.markdown(msg["content"])
+for msg in st.session_state.jarvis_chat_history:
+    with st.chat_message(msg["role"]):
+        st.markdown(msg["content"])
 
-    if user_input := st.chat_input(f"שאל על {chat_project}..."):
-        st.session_state[chat_key].append({"role": "user", "content": user_input})
-        with st.chat_message("user"):
-            st.markdown(user_input)
-        chat_ctx = read_context(chat_project)
-        chat_msgs = build_chat_messages(
-            chat_project, chat_ctx if chat_ctx else "", st.session_state[chat_key]
-        )
-        with st.chat_message("assistant"):
-            with st.spinner("JARVIS..."):
-                reply = call_groq_chat(chat_msgs)
-            st.markdown(reply)
-        st.session_state[chat_key].append({"role": "assistant", "content": reply})
+if user_input := st.chat_input("דבר עם JARVIS..."):
+    st.session_state.jarvis_chat_history.append({"role": "user", "content": user_input})
+    with st.chat_message("user"):
+        st.markdown(user_input)
+
+    with st.chat_message("assistant"):
+        with st.spinner("JARVIS חושב..."):
+            brain = get_jarvis_brain()
+            reply = _run_chat(brain, user_input)
+        st.markdown(reply)
+    st.session_state.jarvis_chat_history.append({"role": "assistant", "content": reply})
 
 # ── Footer ────────────────────────────────────────────────────────────────────
 st.markdown("""

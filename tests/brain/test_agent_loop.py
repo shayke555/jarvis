@@ -27,6 +27,19 @@ async def test_agent_answers_directly_without_tools():
 
 
 @pytest.mark.asyncio
+async def test_agent_retries_via_plain_chat_when_tool_response_is_empty():
+    """chat_with_tools can return '' when the model picks no tool and has nothing
+    to say in tools-mode — must not surface a blank reply, retry via plain chat."""
+    loop = _make_loop(llm_responses=[""])
+    loop._llm.chat = AsyncMock(return_value="a real answer from plain chat")
+
+    result = await loop.run(messages=[{"role": "user", "content": "מה שלומך?"}])
+
+    assert result == "a real answer from plain chat"
+    loop._llm.chat.assert_called_once()
+
+
+@pytest.mark.asyncio
 async def test_agent_uses_tool_then_answers():
     tool_call_response = {
         "tool_calls": [{

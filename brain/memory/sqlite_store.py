@@ -63,7 +63,20 @@ class SQLiteStore:
                     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
                 )
             """)
-            
+
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS memory_blocks (
+                    id INTEGER PRIMARY KEY,
+                    block_type TEXT NOT NULL,
+                    key TEXT NOT NULL,
+                    content TEXT,
+                    metadata TEXT,
+                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    version INTEGER DEFAULT 1,
+                    UNIQUE(block_type, key)
+                )
+            """)
+
             conn.commit()
 
     def add_message(self, interface: str, role: str, content: str) -> None:
@@ -158,3 +171,52 @@ class SQLiteStore:
                 "SELECT * FROM tasks WHERE status = 'open' ORDER BY created_at DESC"
             )
             return [dict(row) for row in cursor.fetchall()]
+
+    def upsert_block(self, block_type: str, key: str, content: str, metadata: dict | None = None) -> None:
+        """Create or update a memory block. Bumps version atomically on conflict (avoids
+        a read-then-write race between concurrent upserts to the same block)."""
+        metadata_json = json.dumps(metadata or {})
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute(
+                """
+                INSERT INTO memory_blocks (block_type, key, content, metadata, updated_at, version)
+                VALUES (?, ?, ?, ?, ?, 1)
+                ON CONFLICT(block_type, key) DO UPDATE SET
+                    content = excluded.content,
+                    metadata = excluded.metadata,
+                    updated_at = excluded.updated_at,
+                    version = memory_blocks.version + 1
+                """,
+                (block_type, key, content, metadata_json, datetime.now().isoformat())
+            )
+            conn.commit()
+
+    def get_block(self, block_type: str, key: str) -> dict | None:
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            row = conn.execute(
+                "SELECT * FROM memory_blocks WHERE block_type = ? AND key = ?",
+                (block_type, key)
+            ).fetchone()
+            if row is None:
+                return None
+            result = dict(row)
+            result['metadata'] = json.loads(result['metadata'] or '{}')
+            return result
+
+    def get_all_blocks(self, block_type: str | None = None) -> list[dict]:
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            if block_type is None:
+                cursor = conn.execute("SELECT * FROM memory_blocks ORDER BY block_type, key")
+            else:
+                cursor = conn.execute(
+                    "SELECT * FROM memory_blocks WHERE block_type = ? ORDER BY key",
+                    (block_type,)
+                )
+            results = []
+            for row in cursor.fetchall():
+                item = dict(row)
+                item['metadata'] = json.loads(item['metadata'] or '{}')
+                results.append(item)
+            return results

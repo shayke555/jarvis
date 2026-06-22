@@ -61,7 +61,7 @@ class LLMRouter:
                 messages=messages,
                 tools=tools if tools else None,
                 tool_choice="auto" if tools else None,
-                temperature=0.3,
+                temperature=0.7,
                 max_tokens=2048,
             )
         except Exception as e:

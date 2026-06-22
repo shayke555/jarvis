@@ -2,6 +2,7 @@ import logging
 import yaml
 from pathlib import Path
 from brain.memory.sqlite_store import SQLiteStore
+from config.settings import settings
 
 logger = logging.getLogger(__name__)
 from brain.memory.chroma_store import ChromaStore
@@ -15,7 +16,7 @@ class ContextManager:
         self.sqlite = SQLiteStore()
         self.chroma = ChromaStore()
         self.llm = LLMRouter()
-        self._shay_context = self._load_shay_context()
+        self._seed_memory_blocks_if_empty()
 
     def _load_shay_context(self) -> str:
         try:
@@ -29,25 +30,62 @@ class ContextManager:
             logger.warning("Failed to load context file: %s", e)
             return ""
 
-    def _build_system_prompt(self, relevant_memories: list[dict], preferences: dict[str, str]) -> str:
+    def _seed_memory_blocks_if_empty(self) -> None:
+        """One-time migration: seed human_block/persona_block from shay_context.yaml
+        the first time memory_blocks is empty. Idempotent — does nothing once seeded."""
+        if self.sqlite.get_all_blocks("human"):
+            return
+
+        raw_yaml = self._load_shay_context()
+        if not raw_yaml:
+            logger.warning("No shay_context.yaml found — starting with empty memory blocks.")
+            return
+
+        try:
+            data = yaml.safe_load(raw_yaml) or {}
+        except Exception as e:
+            logger.warning("Could not parse shay_context.yaml for seeding: %s", e)
+            return
+
+        for section in ("identity", "personality", "projects"):
+            if section in data:
+                content = yaml.dump(data[section], default_flow_style=False, allow_unicode=True)
+                self.sqlite.upsert_block("human", section, content, {"source": "shay_context_yaml_seed"})
+
+        if "communication_with_jarvis" in data:
+            content = yaml.dump(data["communication_with_jarvis"], default_flow_style=False, allow_unicode=True)
+            self.sqlite.upsert_block("persona", "communication_style", content, {"source": "shay_context_yaml_seed"})
+
+        logger.info("Seeded memory_blocks from shay_context.yaml (one-time migration).")
+
+    def _build_system_prompt(self, relevant_memories: list[dict]) -> str:
+        human_blocks = self.sqlite.get_all_blocks("human")
+        persona_blocks = self.sqlite.get_all_blocks("persona")
+        project_blocks = self.sqlite.get_all_blocks("project")
+
         parts = [
-            "You are JARVIS, Shay's personal AI assistant. You know Shay deeply.",
-            "",
-            "## Shay's Profile",
-            "```yaml",
-            self._shay_context.strip(),
-            "```",
+            f"You are JARVIS, {settings.owner_name}'s personal AI assistant. You know him deeply and evolve as you learn more.",
         ]
 
+        if persona_blocks:
+            parts.append("\n## How JARVIS Should Behave")
+            for b in persona_blocks:
+                parts.append(f"### {b['key']}\n{b['content'].strip()}")
+
+        if human_blocks:
+            parts.append("\n## Who Shay Is (dynamic — updates as JARVIS learns)")
+            for b in human_blocks:
+                parts.append(f"### {b['key']}\n{b['content'].strip()}")
+
+        if project_blocks:
+            parts.append("\n## Active Projects")
+            for b in project_blocks:
+                parts.append(f"### {b['key']}\n{b['content'].strip()}")
+
         if relevant_memories:
-            parts.append("\n## Relevant Memories")
+            parts.append("\n## Relevant Memories (episodic)")
             for m in relevant_memories:
                 parts.append(f"- {m['text']}")
-
-        if preferences:
-            parts.append("\n## Shay's Preferences")
-            for key, value in preferences.items():
-                parts.append(f"- {key}: {value}")
 
         return "\n".join(parts)
 
@@ -62,8 +100,7 @@ class ContextManager:
     def build_messages(self, user_message: str) -> list[dict]:
         """Build full messages list (system + history + user) for agent_loop."""
         relevant_memories = self.chroma.search_memories(user_message, n_results=3)
-        preferences = self.sqlite.get_all_preferences()
-        system_prompt = self._build_system_prompt(relevant_memories, preferences)
+        system_prompt = self._build_system_prompt(relevant_memories)
         history = self._build_history(self.sqlite.get_recent_messages(10))
         messages: list[dict] = [{"role": "system", "content": system_prompt}]
         messages.extend(history)
@@ -74,8 +111,7 @@ class ContextManager:
         from tools.search import should_search, search_web
 
         relevant_memories = self.chroma.search_memories(user_message, n_results=3)
-        preferences = self.sqlite.get_all_preferences()
-        system_prompt = self._build_system_prompt(relevant_memories, preferences)
+        system_prompt = self._build_system_prompt(relevant_memories)
 
         if should_search(user_message):
             search_results = await search_web(user_message)
@@ -92,6 +128,13 @@ class ContextManager:
         response = await self.llm.chat(messages, context_tokens=context_tokens)
 
         self.sqlite.add_message(interface, "assistant", response)
+
+        from brain.memory.block_updater import maybe_update_human_block
+        try:
+            await maybe_update_human_block(self, user_message, response)
+        except Exception as e:
+            logger.warning("block_updater failed (non-fatal): %s", e)
+
         return response
 
     def remember(self, fact: str) -> None:
