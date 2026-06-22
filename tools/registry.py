@@ -78,8 +78,12 @@ class ToolRegistry:
             logger.debug("tools.document_reader not ready — skipping")
 
         try:
-            from tools.organizer import organize_files_tool, ORGANIZE_FILES_SCHEMA
+            from tools.organizer import (
+                organize_files_tool, ORGANIZE_FILES_SCHEMA,
+                execute_file_organization_tool, EXECUTE_FILE_ORGANIZATION_SCHEMA,
+            )
             self.register(ORGANIZE_FILES_SCHEMA, organize_files_tool)
+            self.register(EXECUTE_FILE_ORGANIZATION_SCHEMA, execute_file_organization_tool)
         except ImportError:
             logger.debug("tools.organizer not ready — skipping")
 

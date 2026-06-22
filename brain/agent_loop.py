@@ -14,7 +14,7 @@ _MAX_TOOL_ROUNDS = 5
 
 # Tools that mutate the filesystem or execute arbitrary code — require explicit
 # user approval before running (when approval_gate_enabled=True).
-_RISKY_TOOLS = {"run_python", "write_file", "organize_files"}
+_RISKY_TOOLS = {"run_python", "write_file", "execute_file_organization"}
 
 ApprovalCallback = Callable[[str, dict], Coroutine[Any, Any, bool]]
 

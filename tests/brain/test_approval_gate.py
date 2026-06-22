@@ -38,7 +38,7 @@ def _tool_call_response(tool_name: str, args: dict) -> dict:
 def test_risky_tools_set_contains_expected():
     assert "run_python" in _RISKY_TOOLS
     assert "write_file" in _RISKY_TOOLS
-    assert "organize_files" in _RISKY_TOOLS
+    assert "execute_file_organization" in _RISKY_TOOLS
 
 
 def test_non_risky_tool_not_in_set():
@@ -156,10 +156,10 @@ async def test_rejected_tool_appends_rejection_message():
     """After rejection the loop must continue (not crash) and LLM sees rejection."""
     loop = _make_loop(
         llm_responses=[
-            _tool_call_response("organize_files", {"folder": "/tmp"}),
+            _tool_call_response("execute_file_organization", {"folder": "/tmp"}),
             "No problem, I won't organize.",
         ],
-        tool_result=ToolResult(tool_name="organize_files", output="plan", success=True),
+        tool_result=ToolResult(tool_name="execute_file_organization", output="plan", success=True),
     )
     approval_cb = AsyncMock(return_value=False)
 

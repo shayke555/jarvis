@@ -1,11 +1,8 @@
-"""Phase 6 — proposes a file-organization plan for a local folder.
+"""Phase 6 — file organization: plan (dry-run) + execute (behind approval gate).
 
-DRY-RUN ONLY for now: produces a proposed rename/move plan and never touches
-the filesystem. Filesystem mutation rides on Phase 2's approval gate
-(_RISKY_TOOLS in agents/agent_loop.py) once that lands — until then this tool
-is intentionally read-only-by-design, matching CLAUDE.md's "no silent
-failures" + "surgical changes only" rules (we don't ship a half-built
-mutation path).
+Two tools:
+  organize_files            — plan only, read-only, safe to call freely
+  execute_file_organization — executes the plan (moves files), RISKY, requires approval
 """
 from __future__ import annotations
 
@@ -104,10 +101,103 @@ def _format_plan(folder: Path, strategy: str, plan: dict[str, list[str]], total_
             lines.append(f"      ... and {len(filenames) - 10} more")
     lines.append("")
     lines.append(
-        "⚠️ This is a proposal only — JARVIS cannot move files yet (approval gate not built). "
-        "Review the plan; nothing on disk has changed."
+        "⚠️ Dry-run — nothing moved yet. "
+        "To execute: ask JARVIS to run execute_file_organization with the same folder and strategy."
     )
     return "\n".join(lines)
+
+
+EXECUTE_FILE_ORGANIZATION_SCHEMA = {
+    "type": "function",
+    "function": {
+        "name": "execute_file_organization",
+        "description": (
+            "Execute a file organization plan — ACTUALLY MOVES files into subfolders. "
+            "Always run organize_files first to show the user the plan, then use this tool "
+            "only when the user explicitly confirms they want to proceed. Requires approval."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "folder": {"type": "string", "description": "Path to the folder to organize"},
+                "strategy": {
+                    "type": "string",
+                    "enum": sorted(_VALID_STRATEGIES),
+                    "description": "How to group files (must match the plan shown to user)",
+                    "default": "by_type",
+                },
+            },
+            "required": ["folder"],
+        },
+    },
+}
+
+
+def execute_plan(folder: Path, plan: dict[str, list[str]]) -> dict[str, list[str]]:
+    """Execute the plan: move each file into its target subfolder.
+
+    Returns {group: [moved_filenames]} for successes and logs errors per file.
+    Never deletes files — only moves. Creates target subdirectories as needed.
+    """
+    results: dict[str, list[str]] = {}
+    for group, filenames in plan.items():
+        target_dir = folder / group
+        target_dir.mkdir(exist_ok=True)
+        moved = []
+        for name in filenames:
+            src = folder / name
+            dst = target_dir / name
+            try:
+                if not src.exists():
+                    logger.warning("execute_plan: source missing, skipping: %s", src)
+                    continue
+                if dst.exists():
+                    logger.warning("execute_plan: destination exists, skipping: %s", dst)
+                    continue
+                # Guard against path traversal via crafted group/filename
+                if not dst.resolve().is_relative_to(folder.resolve()):
+                    logger.error("execute_plan: dst escapes folder — skipping: %s", dst)
+                    continue
+                src.rename(dst)
+                moved.append(name)
+            except Exception as e:
+                logger.error("execute_plan: failed to move %s → %s: %s", src, dst, e)
+        if moved:
+            results[group] = moved
+    return results
+
+
+async def execute_file_organization_tool(folder: str, strategy: str = "by_type") -> ToolResult:
+    try:
+        if strategy not in _VALID_STRATEGIES:
+            return ToolResult(tool_name="execute_file_organization", output="", success=False,
+                              error=f"Unknown strategy: {strategy}")
+
+        p = safe_path(folder)
+        if p is None:
+            return ToolResult(tool_name="execute_file_organization", output="", success=False,
+                              error="Path rejected: outside allowed directory or contains traversal.")
+        if not p.exists() or not p.is_dir():
+            return ToolResult(tool_name="execute_file_organization", output="", success=False,
+                              error=f"Folder not found: {folder}")
+
+        plan = build_plan(p, strategy)
+        if not plan:
+            return ToolResult(tool_name="execute_file_organization",
+                              output="No files to organize.", success=True)
+
+        results = execute_plan(p, plan)
+        total_moved = sum(len(v) for v in results.items())
+        lines = [f"✅ Organization complete for {folder} (strategy: {strategy})", ""]
+        for group, moved in sorted(results.items()):
+            lines.append(f"  📁 {group}/  — {len(moved)} file(s) moved")
+        lines.append(f"\nTotal moved: {sum(len(v) for v in results.values())} file(s)")
+        return ToolResult(tool_name="execute_file_organization",
+                          output="\n".join(lines), success=True)
+    except Exception as e:
+        logger.error("execute_file_organization failed for %s: %s", folder, e, exc_info=True)
+        return ToolResult(tool_name="execute_file_organization", output="", success=False,
+                          error=f"Organization failed for {folder} (see logs for details).")
 
 
 async def organize_files_tool(folder: str, strategy: str = "by_type") -> ToolResult:
