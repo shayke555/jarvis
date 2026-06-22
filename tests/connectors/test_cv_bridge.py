@@ -5,8 +5,7 @@ from connectors.cv_bridge import fetch_cv_status
 
 
 def test_cv_bridge_returns_error_when_project_not_found():
-    with patch("connectors.cv_bridge._CV_TRACKER_PATH") as mock_path:
-        mock_path.exists.return_value = False
+    with patch("connectors.cv_bridge._ensure_cv_on_path", return_value=False):
         result = fetch_cv_status()
 
     assert result["status"] == "error"
@@ -22,12 +21,10 @@ def test_cv_bridge_returns_ok_with_open_applications():
     mock_pipeline = {"total": 2, "by_status": {"applied": 1, "interviewing": 1}}
 
     with patch("connectors.cv_bridge._ensure_cv_on_path", return_value=True), \
-         patch("connectors.cv_bridge._CV_TRACKER_PATH") as mock_path, \
          patch.dict("sys.modules", {"tracker.applications": MagicMock(
              get_by_status=lambda s: [a for a in mock_apps if a["status"] == s],
              get_pipeline_summary=lambda: mock_pipeline,
          )}):
-        mock_path.exists.return_value = True
         result = fetch_cv_status()
 
     assert result["status"] == "ok"

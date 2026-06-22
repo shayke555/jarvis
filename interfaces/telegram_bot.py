@@ -5,7 +5,7 @@ import logging
 import uuid
 
 from fastapi import FastAPI
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram import Bot, InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import (
     Application,
     ApplicationBuilder,
@@ -49,7 +49,7 @@ async def request_approval(tool_name: str, args: dict) -> bool:
     callback passed into AgentLoop.run().
     """
     request_id = uuid.uuid4().hex  # 32 chars — eliminates collision risk
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     future: asyncio.Future[bool] = loop.create_future()
     _pending_approvals[request_id] = future
 
@@ -122,15 +122,15 @@ async def handle_approval_callback(update: Update, context: ContextTypes.DEFAULT
     await query.answer()
 
 
-_bot_ref: object = None
+_bot_ref: Bot | None = None
 
 
-def _set_bot(bot: object) -> None:
+def _set_bot(bot: Bot) -> None:
     global _bot_ref
     _bot_ref = bot
 
 
-def _get_bot():
+def _get_bot() -> Bot:
     if _bot_ref is None:
         raise RuntimeError("Bot not initialized — call _set_bot() first.")
     return _bot_ref
@@ -289,7 +289,7 @@ async def handle_jobs(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         return
 
     from connectors.cv_bridge import fetch_cv_status
-    result = fetch_cv_status()
+    result = await asyncio.get_running_loop().run_in_executor(None, fetch_cv_status)
 
     if result["status"] == "error":
         await update.message.reply_text(f"❌ לא הצלחתי לטעון נתוני קריירה: {result['error']}")
@@ -324,7 +324,7 @@ async def handle_signals(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         return
 
     from connectors.ledger_bridge import fetch_ledger_signals
-    result = fetch_ledger_signals()
+    result = await asyncio.get_running_loop().run_in_executor(None, fetch_ledger_signals)
 
     if result["status"] == "error":
         await update.message.reply_text(f"❌ LedgerAlpha לא זמין: {result['error']}")

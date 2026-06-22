@@ -44,6 +44,9 @@ class Settings(BaseSettings):
     approval_gate_enabled: bool = True
     approval_gate_timeout_seconds: int = 60
 
+    # Career bridge — Phase 5
+    cv_project_path: str = "C:/Users/shayg/Projects/PROJECT-CV-PRIVTE"
+
     # Voice
     wake_word: str = "hey jarvis"
     voice_enabled: bool = False

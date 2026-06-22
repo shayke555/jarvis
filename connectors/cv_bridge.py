@@ -9,18 +9,23 @@ import logging
 import sys
 from pathlib import Path
 
+from config.settings import settings
+
 logger = logging.getLogger(__name__)
 
-_CV_PROJECT_PATH = Path("C:/Users/shayg/Projects/PROJECT-CV-PRIVTE")
-_CV_TRACKER_PATH = _CV_PROJECT_PATH / "interview-agent" / "tracker"
+
+def _cv_paths() -> tuple[Path, Path]:
+    base = Path(settings.cv_project_path)
+    return base, base / "interview-agent" / "tracker"
 
 
 def _ensure_cv_on_path() -> bool:
     """Add CV project to sys.path so we can import its tracker module."""
-    tracker_parent = str(_CV_PROJECT_PATH / "interview-agent")
+    cv_path, tracker_path = _cv_paths()
+    tracker_parent = str(cv_path / "interview-agent")
     if tracker_parent not in sys.path:
         sys.path.insert(0, tracker_parent)
-    return _CV_TRACKER_PATH.exists()
+    return tracker_path.exists()
 
 
 def fetch_cv_status() -> dict:
@@ -31,11 +36,12 @@ def fetch_cv_status() -> dict:
         {status: "error", data: None, error: <message>}
     """
     try:
+        _, tracker_path = _cv_paths()
         if not _ensure_cv_on_path():
             return {
                 "status": "error",
                 "data": None,
-                "error": f"PROJECT-CV-PRIVTE tracker not found at {_CV_TRACKER_PATH}",
+                "error": f"PROJECT-CV-PRIVTE tracker not found at {tracker_path} (set CV_PROJECT_PATH in .env)",
             }
 
         from tracker.applications import get_by_status, get_pipeline_summary
