@@ -26,6 +26,7 @@ from dashboard_utils import (
     get_notifications,
     get_project_summary,
     get_random_skills,
+    load_cv_status,
     load_ledger,
     load_projects,
     load_skills_index,
@@ -129,7 +130,7 @@ project_map = {p.name: p for p in projects}
 tab_labels  = ["🏠 Overview"] + [
     f"{PROJECT_ICONS.get(p.name,'📁')} {p.name.replace('PROJECT-','')}"
     for p in projects
-]
+] + ["💼 קריירה", "📈 מניות"]
 tabs = st.tabs(tab_labels)
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -414,6 +415,81 @@ if user_input := st.chat_input("דבר עם JARVIS..."):
             reply = _run_chat(brain, user_input)
         st.markdown(reply)
     st.session_state.jarvis_chat_history.append({"role": "assistant", "content": reply})
+
+# ══════════════════════════════════════════════════════════════════════════════
+# TAB N+1 — CAREER (💼 קריירה)
+# ══════════════════════════════════════════════════════════════════════════════
+with tabs[len(projects) + 1]:
+    st.markdown('<div class="section-label">מועמדויות פתוחות</div>', unsafe_allow_html=True)
+    cv_data = load_cv_status()
+    if cv_data["status"] == "error":
+        st.warning(f"⚠️ {cv_data['error']}")
+    elif not cv_data["data"] or cv_data["data"].get("total", 0) == 0:
+        st.info("אין מועמדויות פתוחות כרגע.")
+    else:
+        data = cv_data["data"]
+        apps = data.get("open_applications", [])
+        total = data.get("total", 0)
+        st.markdown(f"**{total} מועמדויות פתוחות**")
+        for app in apps[:20]:
+            company = app.get("company", "?")
+            role = app.get("role", "?")
+            status = app.get("status", "?")
+            date_applied = app.get("date_applied", "?")
+            st.markdown(f"""
+<div class="card" style="padding:12px 18px;margin-bottom:8px;">
+  <div style="display:flex;justify-content:space-between;align-items:center;">
+    <div>
+      <span style="font-weight:600;">{company}</span>
+      <span style="color:var(--text-dim);margin-left:8px;font-size:.85rem;">{role}</span>
+    </div>
+    <div style="font-family:var(--mono);font-size:.72rem;color:var(--text-mute);">
+      [{status}] {date_applied}
+    </div>
+  </div>
+</div>""", unsafe_allow_html=True)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# TAB N+2 — TRADING SIGNALS (📈 מניות)
+# ══════════════════════════════════════════════════════════════════════════════
+with tabs[len(projects) + 2]:
+    st.markdown('<div class="section-label">LedgerAlpha Signals</div>', unsafe_allow_html=True)
+    ledger = load_ledger()
+    if ledger["status"] == "error":
+        st.warning(f"⚠️ LedgerAlpha לא זמין: {ledger['error']}")
+    else:
+        d = ledger["data"]
+        regime = d.get("regime", "unknown")
+        top = d.get("top_signal")
+        timestamp = d.get("timestamp", "")
+
+        col1, col2 = st.columns(2)
+        with col1:
+            regime_color = {"bullish": "var(--mint)", "bearish": "var(--coral)"}.get(regime, "var(--amber)")
+            st.markdown(f"""
+<div class="card" style="padding:18px 22px;">
+  <div class="card-label">REGIME</div>
+  <div class="card-value" style="font-size:1.4rem;font-weight:700;color:{regime_color};">
+    {regime.upper()}
+  </div>
+  <div style="font-family:var(--mono);font-size:.68rem;color:var(--text-mute);margin-top:6px;">{timestamp}</div>
+</div>""", unsafe_allow_html=True)
+        with col2:
+            if top:
+                ticker = top.get("ticker", "?")
+                score = top.get("score", "?")
+                direction = top.get("direction", "?")
+                dir_color = "var(--mint)" if direction == "long" else "var(--coral)"
+                st.markdown(f"""
+<div class="card" style="padding:18px 22px;">
+  <div class="card-label">TOP SIGNAL</div>
+  <div class="card-value" style="font-size:1.3rem;font-weight:700;">{ticker}</div>
+  <div style="font-family:var(--mono);font-size:.78rem;color:{dir_color};margin-top:4px;">
+    {direction.upper()} · score: {score}
+  </div>
+</div>""", unsafe_allow_html=True)
+
 
 # ── Footer ────────────────────────────────────────────────────────────────────
 st.markdown("""

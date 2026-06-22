@@ -495,6 +495,15 @@ def load_ledger():
         return {"status": "error", "data": None, "error": str(e)}
 
 
+@st.cache_data(ttl=300, show_spinner=False)
+def load_cv_status():
+    try:
+        from connectors.cv_bridge import fetch_cv_status
+        return fetch_cv_status()
+    except Exception as e:
+        return {"status": "error", "data": None, "error": str(e)}
+
+
 @st.cache_data(ttl=3600, show_spinner=False)
 def load_trending():
     repos: list = []
