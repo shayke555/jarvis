@@ -20,6 +20,7 @@ from brain.agent_loop import AgentLoop
 from brain.context_manager import ContextManager
 from brain import task_brain
 from config.settings import settings
+from connectors.gmail_bridge import fetch_gmail_summary, format_gmail_section
 
 logger = logging.getLogger(__name__)
 
@@ -351,6 +352,37 @@ async def handle_signals(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     await update.message.reply_text("\n".join(lines))
 
 
+async def handle_gmail(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not _is_authorized(update):
+        await _reject_unauthorized(update, context)
+        return
+
+    if not settings.gmail_app_password or not settings.gmail_email:
+        await update.message.reply_text(
+            "📧 Gmail לא מוגדר.\n"
+            "הוסף ל-.env:\n"
+            "  GMAIL_EMAIL=your@gmail.com\n"
+            "  GMAIL_APP_PASSWORD=your-app-password\n"
+            "(Google App Password — לא הסיסמה הרגילה)"
+        )
+        return
+
+    await update.message.reply_text("📧 סורק מיילים...")
+    result = await asyncio.get_running_loop().run_in_executor(None, fetch_gmail_summary)
+
+    if result["status"] == "error":
+        await update.message.reply_text(f"❌ Gmail: {result['error']}")
+        return
+
+    data = result["data"]
+    if not data:
+        await update.message.reply_text("📧 אין מיילים חדשים.")
+        return
+
+    summary = format_gmail_section(data)
+    await update.message.reply_text(summary)
+
+
 def _route_task_command(text: str) -> str | None:
     """
     Detect task-related commands and handle directly (no LLM call).
@@ -480,6 +512,7 @@ async def run_telegram_bot() -> None:
     application.add_handler(CommandHandler("organize", handle_organize))
     application.add_handler(CommandHandler("jobs", handle_jobs))
     application.add_handler(CommandHandler("signals", handle_signals))
+    application.add_handler(CommandHandler("gmail", handle_gmail))
     application.add_handler(CallbackQueryHandler(handle_approval_callback, pattern="^(approve|reject):"))
     application.add_handler(MessageHandler(filters.VOICE | filters.AUDIO, handle_voice))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
