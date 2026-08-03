@@ -2,11 +2,13 @@
 _Last session: 2026-06-22_
 
 ## Next
-- No critical blockers. Options: Gmail dashboard tab / Instagram feeder / Phase 3 (Ollama)
+- benchmark llama-4-scout-17b vs 70b (optional)
+- Instagram feeder (plan exists at docs/superpowers/plans/)
 
 ## Last Done
-- All phases complete (1,2,4,5,6) + dashboard refactor (986→500 lines) + /gmail + organizer execution
-- Career + Trading tabs in dashboard, ARCHITECTURE.md + ROADMAP.md created
+- Speed: fast model routing, date injection, anti-hallucination rules
+- /help /ping /brief live, typing indicator, Telegram autocomplete
+- Dashboard: Career colors+filter, Gmail tab, Trading full signals
 
 ## Blockers
 - None
